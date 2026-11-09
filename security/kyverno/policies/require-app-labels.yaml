@@ -1,0 +1,27 @@
+# Part of the baseline guardrails. Pod Security Admission handles pod hardening;
+# this policy covers an organisation rule PSA cannot express.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-app-labels
+  annotations:
+    policies.kyverno.io/title: Require standard labels
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/description: >-
+      app.kubernetes.io/name is what NetworkPolicies, PDBs, ServiceMonitors and Loki labels select on.
+spec:
+  validationFailureAction: Enforce      # switch to Audit to trial a new rule without blocking anyone
+  background: true                      # also report on workloads that already exist
+  rules:
+    - name: require-name-label
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [dev, staging, production]
+      validate:
+        message: "The label app.kubernetes.io/name is required."
+        pattern:
+          metadata:
+            labels:
+              app.kubernetes.io/name: "?*"

@@ -1,0 +1,109 @@
+name: CI (lite)
+
+# Build -> Trivy scan -> push to GHCR (free for public repos) -> bump the image
+# tag in lite/gitops/values. Argo CD in the cluster does the deployment.
+# Disable the full-edition "CI" workflow on a lite-only fork (it targets AWS ECR).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - ".github/workflows/ci-lite.yaml"
+
+concurrency:
+  group: ci-lite
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.f.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        run: |
+          apps=()
+          [ -f apps/backend/composer.json ] && apps+=(backend)
+          [ -f apps/frontend/package.json ] && apps+=(frontend)
+          echo "apps=$(jq -cn '$ARGS.positional' --args "${apps[@]}")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.detect.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name and tag
+        run: |
+          echo "TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.app }}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (local only)
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          load: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,scope=${{ matrix.app }},mode=max
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ env.TAG }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        run: docker push "$IMAGE:$TAG"
+
+  bump:
+    needs: [detect, build]
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Point the lite values at the new image tag
+        env:
+          APPS: ${{ needs.detect.outputs.apps }}
+        run: |
+          tag="${GITHUB_SHA::7}"
+          for app in $(jq -r '.[]' <<<"$APPS"); do
+            files=("lite/gitops/values/$app.yaml")
+            # the worker runs the backend image
+            [ "$app" = backend ] && files+=("lite/gitops/values/worker.yaml")
+            for f in "${files[@]}"; do
+              sed -i -E "s|^(  tag: )\".*\"|\1\"$tag\"|" "$f"
+            done
+          done
+          git diff --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lite/gitops/values
+          git diff --cached --quiet || git commit -m "ci(lite): deploy $tag"
+          git push

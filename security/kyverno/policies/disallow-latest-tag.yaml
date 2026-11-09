@@ -1,0 +1,39 @@
+# Part of the baseline guardrails. Pod Security Admission handles pod hardening;
+# this policy covers an organisation rule PSA cannot express.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow latest tag
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Images must carry an explicit, non-latest tag. ECR tags are immutable, so a tag identifies exactly one build and rollbacks are trustworthy.
+spec:
+  validationFailureAction: Enforce      # switch to Audit to trial a new rule without blocking anyone
+  background: true                      # also report on workloads that already exist
+  rules:
+    - name: require-image-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [dev, staging, production]
+      validate:
+        message: "Images must specify a tag (use the git SHA)."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: block-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [dev, staging, production]
+      validate:
+        message: "The ':latest' tag is not allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"

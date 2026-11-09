@@ -1,0 +1,23 @@
+# Production differences: longer retention, bigger disk, HA Alertmanager.
+# Prometheus itself stays a single replica here (cost); the next step is two
+# replicas + Thanos/Mimir for long-term storage. See "What I would improve".
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: 40GB
+    externalLabels:
+      cluster: prod
+    resources:
+      requests: { cpu: 500m, memory: 2Gi }
+      limits: { memory: 4Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+alertmanager:
+  alertmanagerSpec:
+    replicas: 2

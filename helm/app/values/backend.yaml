@@ -1,0 +1,78 @@
+# Laravel API. Layer 3 of the values stack (see ../values.yaml).
+fullnameOverride: backend
+containerPort: 8080
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+migration:
+  enabled: true            # php artisan migrate --force as a pre-rollout Job
+
+metrics:
+  serviceMonitor:
+    enabled: true          # CRDs come from kube-prometheus-stack (ApplicationSet skips dry-run)
+
+# Secrets are referenced here and resolved at runtime; the env layer supplies the
+# exact Secrets Manager key (gitops/environments/<env>/backend.yaml).
+externalSecret:
+  enabled: true
+
+serviceAccount:
+  create: true
+  name: backend            # must match the IRSA trust policy in Terraform
+
+# The serversideup/php image runs as www-data. A NAME is not verifiable by
+# `runAsNonRoot`, so pin the numeric uid/gid (33 on the Debian variant).
+podSecurityContext:
+  runAsUser: 33
+  runAsGroup: 33
+
+# HARDENING TODO: nginx + php-fpm write runtime files outside /tmp in this
+# image, so a read-only root FS needs extra emptyDir mounts. Left off so the
+# app boots first time; tighten it as an exercise (see helm/app/README.md).
+securityContext:
+  readOnlyRootFilesystem: false
+
+probes:
+  startup:                # up to 60 s to boot without being restarted
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 2
+    failureThreshold: 30
+  liveness:               # process-level only: does NOT touch DB or Redis
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:              # checks DB + Redis, so a broken dependency removes the pod from the LB
+    httpGet: { path: /readyz, port: http }
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+ingress:
+  enabled: true
+  paths:
+    - path: /api
+      pathType: Prefix
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip           # route straight to pod IPs (no NodePort hop)
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/group.order: "10"         # evaluated before the frontend's catch-all "/"
+    # Env layer adds: group.name (share ONE ALB), certificate-arn
+
+networkPolicy:
+  allowHttpsEgress: true          # S3 / STS / Secrets Manager via IRSA
+  dataTierPorts: [5432, 6379]     # env layer supplies the subnet CIDRs

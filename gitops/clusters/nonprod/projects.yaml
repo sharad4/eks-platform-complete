@@ -1,0 +1,34 @@
+# AppProjects are ArgoCD's guard rails. A workload Application can only deploy
+# FROM our repo, INTO its own namespaces, and cannot create cluster-scoped
+# resources. A compromised app config therefore cannot touch the platform.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  description: Application workloads (dev, staging)
+  sourceRepos:
+    - https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: dev }
+    - { server: https://kubernetes.default.svc, namespace: staging }
+  clusterResourceWhitelist: []        # no Namespaces, ClusterRoles, CRDs...
+  namespaceResourceBlacklist:
+    - { group: "", kind: ResourceQuota }   # quotas are platform-owned
+    - { group: "", kind: LimitRange }
+  orphanedResources:
+    warn: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Cluster tooling (monitoring, policies, controllers). Broad rights by necessity.
+  sourceRepos: ["*"]                  # upstream Helm repos + our repo
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }

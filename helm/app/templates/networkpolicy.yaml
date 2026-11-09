@@ -1,0 +1,90 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $port := .Values.containerPort }}
+# Allow-list model: once this policy selects the pods, anything not listed is
+# dropped. No ingress source listed => nothing can reach the pod (the worker).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- if or $np.ingressFromCidrs $np.ingressFromNamespaces $np.ingressRules }}
+  ingress:
+    {{- if $np.ingressFromCidrs }}
+    - from:
+        {{- range $np.ingressFromCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $port }}
+    {{- end }}
+    {{- if $np.ingressFromNamespaces }}
+    - from:
+        {{- range $np.ingressFromNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $port }}
+    {{- end }}
+    {{- with $np.ingressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else }}
+  ingress: []
+  {{- end }}
+  {{- if or $np.allowDns $np.allowHttpsEgress $np.dataTierCidrs $np.egressRules }}
+  egress:
+    {{- if $np.allowDns }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    {{- if and $np.dataTierCidrs $np.dataTierPorts }}
+    - to:
+        {{- range $np.dataTierCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $np.dataTierPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- if $np.allowHttpsEgress }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- with $np.egressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else }}
+  egress: []
+  {{- end }}
+{{- end }}

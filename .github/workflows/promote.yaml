@@ -1,0 +1,125 @@
+name: Promote
+
+# Promotion = "copy the image tags that already run in one environment into the
+# next one". The SAME immutable image moves forward; nothing is rebuilt.
+#
+#   dev -> staging       approval: none, PR review
+#   staging -> production approval: GitHub Environment "production" (required reviewers)
+#                         + PR review + manual ArgoCD sync + canary analysis
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Source environment
+        type: choice
+        options: [dev, staging]
+        required: true
+      to:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_PREFIX: eks-platform
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      backend_tag: ${{ steps.tags.outputs.backend }}
+      frontend_tag: ${{ steps.tags.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Only allow dev->staging and staging->production
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          case "$FROM->$TO" in
+            "dev->staging"|"staging->production") ;;
+            *) echo "::error::Unsupported promotion path $FROM -> $TO (environments must be promoted in order)"; exit 1 ;;
+          esac
+
+      - id: tags
+        env:
+          FROM: ${{ inputs.from }}
+        run: |
+          echo "backend=$(yq '.image.tag' "gitops/environments/$FROM/backend.yaml")" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(yq '.image.tag' "gitops/environments/$FROM/frontend.yaml")" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify both images exist in ECR
+        run: |
+          aws ecr describe-images --repository-name "$ECR_PREFIX/backend"  --image-ids imageTag="${{ steps.tags.outputs.backend }}"  >/dev/null
+          aws ecr describe-images --repository-name "$ECR_PREFIX/frontend" --image-ids imageTag="${{ steps.tags.outputs.frontend }}" >/dev/null
+
+  # Production only: the version about to ship must be healthy in staging RIGHT NOW.
+  staging-smoke:
+    needs: validate
+    if: inputs.to == 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test staging
+        env:
+          BASE_URL: ${{ vars.STAGING_URL }}
+        run: scripts/smoke-test.sh
+
+  promote:
+    needs: [validate, staging-smoke]
+    # `staging-smoke` is skipped for dev->staging; run anyway in that case.
+    if: ${{ !cancelled() && needs.validate.result == 'success' && (needs.staging-smoke.result == 'success' || needs.staging-smoke.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    # Required reviewers configured on the "production" Environment gate this job.
+    environment: ${{ inputs.to }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Open promotion PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TO: ${{ inputs.to }}
+          FROM: ${{ inputs.from }}
+          BACKEND_TAG: ${{ needs.validate.outputs.backend_tag }}
+          FRONTEND_TAG: ${{ needs.validate.outputs.frontend_tag }}
+        run: |
+          set -euo pipefail
+          branch="promote/${TO}-${BACKEND_TAG}-${FRONTEND_TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+
+          for f in backend worker; do
+            TAG="$BACKEND_TAG" yq -i '.image.tag = strenv(TAG) | .image.tag style="double"' "gitops/environments/$TO/$f.yaml"
+          done
+          TAG="$FRONTEND_TAG" yq -i '.image.tag = strenv(TAG) | .image.tag style="double"' "gitops/environments/$TO/frontend.yaml"
+
+          git add gitops/environments
+          git diff --cached --quiet && { echo "$TO already runs these tags"; exit 0; }
+          git commit -m "promote: ${FROM} -> ${TO} (backend ${BACKEND_TAG}, frontend ${FRONTEND_TAG})"
+          git push -u origin "$branch"
+
+          gh pr create --base main --head "$branch" \
+            --title "Promote ${FROM} to ${TO}: backend ${BACKEND_TAG}, frontend ${FRONTEND_TAG}" \
+            --body "Promotes the exact images running in **${FROM}** to **${TO}**.
+
+          - backend/worker: \`${BACKEND_TAG}\`
+          - frontend: \`${FRONTEND_TAG}\`
+
+          After merge: staging syncs automatically. Production shows OutOfSync until someone syncs it in ArgoCD; the Argo Rollouts canary then runs with Prometheus analysis and rolls back on its own if the success ratio drops."

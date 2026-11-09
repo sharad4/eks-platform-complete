@@ -1,0 +1,106 @@
+# Third-party platform tooling, installed from upstream Helm charts with PINNED
+# versions and OUR values (kept in this repo, next to the thing they configure).
+#
+# Chart versions below were NOT verified against the live repos when written.
+# Check and bump them deliberately before the first sync:  scripts/check-versions.sh
+#
+# Ordering note: Applications stamped out by an ApplicationSet sync independently,
+# so there is no strict "A before B". The system is eventually consistent instead:
+# anything that needs a CRD that is not there yet fails once and retries (see
+# `retry` + SkipDryRunOnMissingResource). That is normal GitOps behaviour.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-tools
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - name: argo-rollouts
+            repo: https://argoproj.github.io/argo-helm
+            chart: argo-rollouts
+            version: 2.40.1
+            namespace: argo-rollouts
+            values: gitops/platform/values/argo-rollouts.yaml
+            override: gitops/platform/values/argo-rollouts-nonprod.yaml
+          - name: kube-prometheus-stack
+            repo: https://prometheus-community.github.io/helm-charts
+            chart: kube-prometheus-stack
+            version: 75.6.0
+            namespace: monitoring
+            values: monitoring/prometheus/values.yaml
+            override: monitoring/prometheus/values-nonprod.yaml
+          - name: loki
+            repo: https://grafana.github.io/helm-charts
+            chart: loki
+            version: 6.30.1
+            namespace: monitoring
+            values: monitoring/loki/values.yaml
+            override: monitoring/loki/values-nonprod.yaml
+          - name: alloy
+            repo: https://grafana.github.io/helm-charts
+            chart: alloy
+            version: 1.1.1
+            namespace: monitoring
+            values: monitoring/alloy/values.yaml
+            override: monitoring/alloy/values-nonprod.yaml
+          - name: tempo
+            repo: https://grafana.github.io/helm-charts
+            chart: tempo
+            version: 1.23.1
+            namespace: monitoring
+            values: monitoring/tempo/values.yaml
+            override: monitoring/tempo/values-nonprod.yaml
+          - name: kyverno
+            repo: https://kyverno.github.io/kyverno
+            chart: kyverno
+            version: 3.4.1
+            namespace: kyverno
+            values: security/kyverno/values.yaml
+            override: security/kyverno/values-nonprod.yaml
+          - name: chaos-mesh
+            repo: https://charts.chaos-mesh.org
+            chart: chaos-mesh
+            version: 2.7.2
+            namespace: chaos-mesh
+            values: chaos/chaos-mesh-values.yaml
+            override: chaos/chaos-mesh-values-nonprod.yaml
+  template:
+    metadata:
+      name: "{{.name}}"
+      labels:
+        tier: platform
+    spec:
+      project: platform
+      sources:
+        - repoURL: "{{.repo}}"
+          chart: "{{.chart}}"
+          targetRevision: "{{.version}}"
+          helm:
+            releaseName: "{{.name}}"
+            ignoreMissingValueFiles: true     # per-cluster override files are optional
+            valueFiles:
+              - "$values/{{.values}}"
+              - "$values/{{.override}}"
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true        # required: kube-prometheus-stack CRDs exceed the annotation size limit
+          - SkipDryRunOnMissingResource=true
+        retry:
+          limit: 8
+          backoff: { duration: 20s, factor: 2, maxDuration: 5m }

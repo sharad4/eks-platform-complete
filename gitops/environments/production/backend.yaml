@@ -1,0 +1,49 @@
+# Environment layer (4 of 4). CI edits ONLY image.tag; humans edit the rest via PR.
+image:
+  repository: __ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/backend
+  tag: "initial"
+
+config:
+  APP_ENV: production
+  APP_URL: https://app.__DOMAIN__
+  AWS_BUCKET: eks-platform-production-uploads-__ACCOUNT_ID__
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::__ACCOUNT_ID__:role/eks-platform-production-backend
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 12
+
+externalSecret:
+  dataFrom:
+    - extract:
+        key: prod/production/backend          # APP_KEY, DB_HOST, REDIS_* ...
+  data:
+    # Master credentials live in the RDS-managed secret (auto-rotated).
+    - secretKey: DB_USERNAME
+      remoteRef: { key: "__DB_SECRET_ARN_PRODUCTION__", property: username }
+    - secretKey: DB_PASSWORD
+      remoteRef: { key: "__DB_SECRET_ARN_PRODUCTION__", property: password }
+
+ingress:
+  host: app.__DOMAIN__
+  annotations:
+    alb.ingress.kubernetes.io/group.name: platform-production     # one ALB per environment
+    alb.ingress.kubernetes.io/certificate-arn: __CERT_ARN_PRODUCTION__
+
+networkPolicy:
+  ingressFromCidrs: ["10.20.0.0/16"]   # ALB (target-type ip) lives in the VPC
+  ingressFromNamespaces: ["monitoring"]
+  dataTierCidrs: ["10.20.10.0/24", "10.20.11.0/24", "10.20.12.0/24"]
+
+# --- Production-only behaviour -------------------------------------------------
+rollout:
+  enabled: true
+  analysis:
+    enabled: true
+pdb:
+  minAvailable: 2
+topologySpread:
+  zoneWhenUnsatisfiable: DoNotSchedule   # guarantee AZ spread

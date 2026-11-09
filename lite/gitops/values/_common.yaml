@@ -1,0 +1,30 @@
+# Lite overrides applied to EVERY workload.
+# One small node: no autoscaling, no disruption budget (a PDB on a single
+# replica would block node drains for no benefit).
+autoscaling:
+  enabled: false
+replicaCount: 1
+pdb:
+  enabled: false
+
+# GHCR packages are private by default. If you did not make them public, the
+# bootstrap script creates this pull secret from GHCR_USER / GHCR_TOKEN.
+# A missing pull secret is only a warning, so it is safe to always reference.
+imagePullSecrets:
+  - name: ghcr-pull
+
+# k3s ships Traefik instead of the AWS Load Balancer Controller.
+ingress:
+  className: traefik
+  annotations: null        # null deletes the ALB annotations inherited from values/<app>.yaml
+
+metrics:
+  serviceMonitor:
+    enabled: false         # flip to true after enabling lite/gitops/optional/monitoring.yaml
+
+networkPolicy:
+  allowHttpsEgress: false
+  ingressFromCidrs: []
+  ingressFromNamespaces: [kube-system, monitoring]   # Traefik + Prometheus
+  dataTierCidrs: []
+  dataTierPorts: []

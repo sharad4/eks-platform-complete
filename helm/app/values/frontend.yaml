@@ -1,0 +1,57 @@
+# React SPA served by nginx-unprivileged.
+fullnameOverride: frontend
+containerPort: 8080
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+serviceAccount:
+  create: true
+
+# nginx-unprivileged runs as uid 101 and writes only to /tmp, so the strict
+# defaults (read-only root FS + /tmp emptyDir) work unchanged.
+podSecurityContext:
+  runAsUser: 101
+  runAsGroup: 101
+
+probes:
+  startup:
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 2
+    failureThreshold: 15
+  liveness:
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    httpGet: { path: /healthz, port: http }
+    periodSeconds: 5
+    failureThreshold: 3
+
+ingress:
+  enabled: true
+  paths:
+    - path: /
+      pathType: Prefix
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/group.order: "20"         # catch-all, evaluated last
+
+# A static file server needs no outbound traffic at all: no DNS, no HTTPS.
+networkPolicy:
+  allowDns: false
+  allowHttpsEgress: false

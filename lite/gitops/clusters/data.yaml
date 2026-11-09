@@ -1,0 +1,21 @@
+# PostgreSQL + Redis as in-cluster StatefulSets (replaces RDS + ElastiCache).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data
+  namespace: argocd
+spec:
+  project: platform-lite
+  source:
+    repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+    targetRevision: main
+    path: lite/gitops/platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

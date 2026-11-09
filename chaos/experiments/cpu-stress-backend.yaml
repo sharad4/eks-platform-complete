@@ -1,0 +1,21 @@
+# EXPERIMENT 3: burn CPU in the backend pods for 10 minutes.
+# Hypothesis: the HPA (target 70% of the CPU request) adds replicas within ~1-2 minutes,
+#   latency recovers, and HPAMaxedOut stays quiet because maxReplicas has headroom.
+# Run:  kubectl apply -f chaos/experiments/cpu-stress-backend.yaml
+#       kubectl -n dev get hpa backend -w
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: cpu-stress-backend
+  namespace: dev
+spec:
+  mode: all
+  selector:
+    namespaces: [dev]
+    labelSelectors:
+      app.kubernetes.io/name: backend
+  stressors:
+    cpu:
+      workers: 1
+      load: 90
+  duration: 10m

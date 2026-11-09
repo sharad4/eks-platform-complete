@@ -1,0 +1,86 @@
+# Application and platform alerts that complement the default kube-prometheus-stack
+# rules (which already cover pod crash loops, not-ready pods, replica mismatches,
+# node pressure and full disks). Every alert has a runbook link and a severity that
+# decides routing: critical -> page, warning -> ticket channel.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: eks-platform
+spec:
+  groups:
+    - name: app
+      rules:
+        - alert: BackendDown
+          expr: sum by (namespace) (up{service="backend"}) == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.namespace }}: no backend instance is being scraped"
+            description: "Either every pod is down or Prometheus cannot reach them (check NetworkPolicy and the ServiceMonitor)."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/pod-crashloop.md
+
+        - alert: HighLatencyP95
+          expr: sli:http_latency_p95_seconds:rate5m > 0.5
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.namespace }}: p95 latency above 500 ms"
+            description: "p95 is {{ $value | humanizeDuration }}. Check the RED dashboard, slow queries (RDS Performance Insights) and HPA headroom."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/high-latency.md
+
+        - alert: WorkerNotRunning
+          expr: kube_deployment_status_replicas_available{deployment="worker"} == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.namespace }}: no queue worker is running"
+            description: "Jobs are accumulating in Redis and nothing is processing them."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/pod-crashloop.md
+
+    - name: platform
+      rules:
+        - alert: HPAMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace=~"dev|staging|production"}
+            >= kube_horizontalpodautoscaler_spec_max_replicas{namespace=~"dev|staging|production"}
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} is at max replicas"
+            description: "Autoscaling cannot add capacity any more. Raise maxReplicas or investigate the load source."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/high-latency.md
+
+        - alert: ContainerOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled",namespace=~"dev|staging|production"} == 1
+            and on (namespace, pod, container)
+            increase(kube_pod_container_status_restarts_total[10m]) > 0
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} was OOM-killed"
+            description: "Container {{ $labels.container }} exceeded its memory limit. Raise the limit or fix the leak."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/pod-crashloop.md
+
+        - alert: ExternalSecretSyncFailing
+          expr: externalsecret_status_condition{condition="Ready",status="False"} == 1
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} is not syncing"
+            description: "The Kubernetes Secret is stale or missing. Usually IAM (IRSA policy), a wrong secret name, or the ClusterSecretStore."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/externalsecret-sync-failure.md
+
+        - alert: PersistentVolumeFillingUp
+          expr: |
+            kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.15
+            and
+            predict_linear(kubelet_volume_stats_available_bytes[6h], 24 * 3600) < 0
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} will be full within 24h"
+            description: "Prometheus, Loki, Tempo and Grafana all store data on PVCs. Expand the volume (allowVolumeExpansion is on) or cut retention."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/node-capacity.md

@@ -1,0 +1,61 @@
+# Repo-owned platform config that sits ON TOP of the tooling above: alert rules,
+# dashboards, secrets for Grafana/Alertmanager, policies, quotas, default-deny.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: platform
+  sources:
+    - { repoURL: "https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git", targetRevision: main, path: monitoring/prometheus/rules }
+    - { repoURL: "https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git", targetRevision: main, path: monitoring/prometheus/servicemonitors }
+    - { repoURL: "https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git", targetRevision: main, path: monitoring/grafana/dashboards }
+    - { repoURL: "https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git", targetRevision: main, path: monitoring/alertmanager }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true]
+    retry: { limit: 8, backoff: { duration: 20s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+    targetRevision: main
+    path: security/kyverno/policies
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true]
+    retry: { limit: 8, backoff: { duration: 20s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: namespace-guardrails
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: platform
+  sources:
+    - { repoURL: "https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git", targetRevision: main, path: security/network-policies/nonprod }
+    - { repoURL: "https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git", targetRevision: main, path: security/quotas/nonprod }
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true]

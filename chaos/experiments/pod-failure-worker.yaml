@@ -1,0 +1,18 @@
+# EXPERIMENT 4: make every queue worker unavailable for 2 minutes (pods are NOT killed, their
+# containers just stop working, like a hung process).
+# Hypothesis: jobs queue up in Redis and drain after recovery with no loss; the
+#   WorkerNotRunning alert only fires if it lasts > 5 minutes (so it should stay silent here).
+# Run:  kubectl apply -f chaos/experiments/pod-failure-worker.yaml
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-worker
+  namespace: dev
+spec:
+  action: pod-failure
+  mode: all
+  selector:
+    namespaces: [dev]
+    labelSelectors:
+      app.kubernetes.io/name: worker
+  duration: 2m

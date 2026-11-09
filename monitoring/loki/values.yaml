@@ -1,0 +1,46 @@
+# Loki in "single binary" mode on an EBS volume: the simplest setup that is still
+# honest. Loki indexes only LABELS (namespace, pod, app), not log text, which is why
+# it costs a fraction of Elasticsearch. For production scale, switch storage to S3
+# (IRSA role + bucket) and run the simple-scalable mode.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false            # single tenant
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: 168h       # 7 days
+  compactor:
+    retention_enabled: true      # without this, retention_period is ignored and disk fills
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: gp3
+
+# Switch off every component of the distributed mode.
+backend: { replicas: 0 }
+read: { replicas: 0 }
+write: { replicas: 0 }
+gateway: { enabled: false }
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+lokiCanary: { enabled: false }
+test: { enabled: false }

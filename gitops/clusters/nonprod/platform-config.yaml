@@ -1,0 +1,27 @@
+# Namespaces (with Pod Security labels), the ClusterSecretStore and StorageClass.
+# Wave 0: everything else depends on these existing.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: platform
+  sources:
+    - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+      targetRevision: main
+      path: gitops/platform/base
+    - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+      targetRevision: main
+      path: gitops/platform/nonprod
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

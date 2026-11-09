@@ -1,0 +1,23 @@
+# EXPERIMENT 1: kill a backend pod every few minutes.
+# Hypothesis: users see no errors, because >=2 replicas, readiness gating and the
+#   ALB's draining absorb a single pod loss. The HPA/ReplicaSet replace the pod.
+# Steady state: success ratio >= 99.9%, p95 < 500 ms (dashboard: Application RED + SLO).
+# Abort if: error ratio > 1% for 2 minutes (delete the experiment).
+# Run:  kubectl apply -f chaos/experiments/pod-kill-backend.yaml
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Schedule
+metadata:
+  name: pod-kill-backend
+  namespace: dev
+spec:
+  schedule: "*/5 * * * *"
+  type: PodChaos
+  historyLimit: 5
+  concurrencyPolicy: Forbid
+  podChaos:
+    action: pod-kill
+    mode: one
+  selector:
+    namespaces: [dev]
+    labelSelectors:
+      app.kubernetes.io/name: backend

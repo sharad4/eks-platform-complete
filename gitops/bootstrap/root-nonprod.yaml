@@ -1,0 +1,28 @@
+# THE ONLY MANIFEST YOU APPLY BY HAND (once per cluster):
+#   kubectl apply -f gitops/bootstrap/root-nonprod.yaml
+#
+# "App of apps": this Application watches gitops/clusters/nonprod/, which holds
+# the Applications for everything else (platform tooling, monitoring, security,
+# workloads). Add a file there, merge, and ArgoCD deploys it. Git is the API.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+    targetRevision: main
+    path: gitops/clusters/nonprod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

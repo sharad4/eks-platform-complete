@@ -1,0 +1,103 @@
+# SLIs recorded as rules, plus multi-window multi-burn-rate alerts (the method from
+# the Google SRE Workbook). Targets are defined in monitoring/slo/README.md.
+#
+#   Availability SLO: 99.9% of requests are not 5xx (30-day window)
+#   Error budget    : 0.1% = ~43 minutes of full outage per 30 days
+#
+# Why burn-rate alerts instead of "error rate > 5%"? A fixed threshold either pages
+# you for harmless blips or misses a slow leak that quietly eats the whole budget.
+# Burn rate = how many times faster than "exactly on budget" we are failing.
+#   14.4x for 1h  -> 2% of the monthly budget gone in an hour  -> page now
+#    6x   for 6h  -> 5% of the budget gone in six hours        -> page
+#    1x   for 3d  -> slow bleed that will exhaust the budget   -> ticket
+# Each alert needs BOTH a long and a short window: the long one proves it is real,
+# the short one proves it is still happening (so alerts resolve quickly).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-availability
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: eks-platform
+spec:
+  groups:
+    - name: sli-recording
+      interval: 30s
+      rules:
+        - record: sli:http_error_ratio:rate5m
+          expr: |
+            sum by (namespace) (rate(http_requests_total{service="backend",status=~"5.."}[5m]))
+            /
+            sum by (namespace) (rate(http_requests_total{service="backend"}[5m]))
+        - record: sli:http_error_ratio:rate30m
+          expr: |
+            sum by (namespace) (rate(http_requests_total{service="backend",status=~"5.."}[30m]))
+            /
+            sum by (namespace) (rate(http_requests_total{service="backend"}[30m]))
+        - record: sli:http_error_ratio:rate1h
+          expr: |
+            sum by (namespace) (rate(http_requests_total{service="backend",status=~"5.."}[1h]))
+            /
+            sum by (namespace) (rate(http_requests_total{service="backend"}[1h]))
+        - record: sli:http_error_ratio:rate6h
+          expr: |
+            sum by (namespace) (rate(http_requests_total{service="backend",status=~"5.."}[6h]))
+            /
+            sum by (namespace) (rate(http_requests_total{service="backend"}[6h]))
+        - record: sli:http_error_ratio:rate3d
+          expr: |
+            sum by (namespace) (rate(http_requests_total{service="backend",status=~"5.."}[3d]))
+            /
+            sum by (namespace) (rate(http_requests_total{service="backend"}[3d]))
+        # Latency SLI: share of requests faster than 500 ms (the 0.5 bucket).
+        - record: sli:http_latency_good_ratio:rate5m
+          expr: |
+            sum by (namespace) (rate(http_request_duration_seconds_bucket{service="backend",le="0.5"}[5m]))
+            /
+            sum by (namespace) (rate(http_request_duration_seconds_count{service="backend"}[5m]))
+        - record: sli:http_latency_p95_seconds:rate5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (namespace, le) (rate(http_request_duration_seconds_bucket{service="backend"}[5m])))
+
+    - name: slo-burn-rate
+      rules:
+        - alert: ErrorBudgetBurnFast
+          expr: |
+            sli:http_error_ratio:rate1h > (14.4 * 0.001)
+            and
+            sli:http_error_ratio:rate5m > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+            slo: availability
+          annotations:
+            summary: "{{ $labels.namespace }}: burning the 30-day error budget 14x too fast"
+            description: "5xx ratio is {{ $value | humanizePercentage }} (1h window). At this rate the monthly budget is gone in about 2 days."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/high-error-rate.md
+        - alert: ErrorBudgetBurnSlow
+          expr: |
+            sli:http_error_ratio:rate6h > (6 * 0.001)
+            and
+            sli:http_error_ratio:rate30m > (6 * 0.001)
+          for: 15m
+          labels:
+            severity: critical
+            slo: availability
+          annotations:
+            summary: "{{ $labels.namespace }}: burning the 30-day error budget 6x too fast"
+            description: "5xx ratio is {{ $value | humanizePercentage }} (6h window)."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/high-error-rate.md
+        - alert: ErrorBudgetBurnTicket
+          expr: |
+            sli:http_error_ratio:rate3d > (1 * 0.001)
+            and
+            sli:http_error_ratio:rate6h > (1 * 0.001)
+          for: 1h
+          labels:
+            severity: warning
+            slo: availability
+          annotations:
+            summary: "{{ $labels.namespace }}: error budget is draining steadily"
+            description: "Sustained 5xx ratio of {{ $value | humanizePercentage }} over 3 days. Create a ticket and investigate before the budget is gone."
+            runbook_url: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__/blob/main/docs/runbooks/high-error-rate.md

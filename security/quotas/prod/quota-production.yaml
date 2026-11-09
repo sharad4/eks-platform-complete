@@ -1,0 +1,14 @@
+# Platform-owned (the `apps` ArgoCD project cannot create quotas): a runaway HPA or a
+# bad deploy cannot starve the rest of the cluster. NOTE: no `limits.cpu` entry on purpose,
+# because our pods deliberately have no CPU limit and the quota would reject them.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute
+  namespace: production
+spec:
+  hard:
+    requests.cpu: "24"
+    requests.memory: 48Gi
+    limits.memory: 96Gi
+    pods: "150"

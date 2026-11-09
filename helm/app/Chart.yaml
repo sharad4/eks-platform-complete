@@ -1,0 +1,10 @@
+apiVersion: v2
+name: app
+description: >-
+  One reusable, security-hardened chart for every workload in the platform
+  (backend API, frontend, queue worker). Behaviour is driven by values, so a
+  security or reliability fix lands in ONE place and benefits all three.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.29.0-0"

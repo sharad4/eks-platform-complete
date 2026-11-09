@@ -1,0 +1,4 @@
+# Admission webhooks are on the critical path of every pod creation: run 3 replicas
+# so a single node loss never blocks deployments.
+admissionController:
+  replicas: 3

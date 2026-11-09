@@ -1,0 +1,59 @@
+name: Terraform drift detection
+
+# Weekly: does reality still match the code? Someone clicking in the console is
+# the most common way infrastructure silently diverges. A drift opens an issue.
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [nonprod, prod]
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ matrix.env }}
+    env:
+      TF_VAR_public_access_cidrs: ${{ vars.TF_PUBLIC_ACCESS_CIDRS }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ matrix.env }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=eks-platform-tfstate-lock" \
+            -backend-config="encrypt=true"
+      - name: Plan and open an issue on drift
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock=false -detailed-exitcode > plan.txt 2>&1
+          code=$?
+          if [ "$code" -eq 2 ]; then
+            gh issue create --title "Terraform drift detected: ${{ matrix.env }}" \
+              --label drift \
+              --body "The weekly plan for \`${{ matrix.env }}\` is not empty. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+          [ "$code" -eq 1 ] && { cat plan.txt; exit 1; }
+          exit 0

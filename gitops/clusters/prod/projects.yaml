@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  description: Application workloads (production)
+  sourceRepos:
+    - https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: production }
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - { group: "", kind: ResourceQuota }
+    - { group: "", kind: LimitRange }
+  orphanedResources:
+    warn: true
+  # Defence in depth: even a manual sync is only possible in a business-hours
+  # window. Remove or adjust to match your change policy.
+  syncWindows:
+    - kind: allow
+      schedule: "30 3 * * 1-5"      # 03:30 UTC Mon-Fri  (09:00 IST)
+      duration: 10h
+      applications: ["*"]
+      manualSync: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Cluster tooling
+  sourceRepos: ["*"]
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }

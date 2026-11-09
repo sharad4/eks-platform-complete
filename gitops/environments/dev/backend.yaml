@@ -1,0 +1,39 @@
+# Environment layer (4 of 4). CI edits ONLY image.tag; humans edit the rest via PR.
+image:
+  repository: __ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/backend
+  tag: "initial"
+
+config:
+  APP_ENV: dev
+  APP_URL: https://dev.__DOMAIN__
+  AWS_BUCKET: eks-platform-dev-uploads-__ACCOUNT_ID__
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::__ACCOUNT_ID__:role/eks-platform-dev-backend
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 2
+
+externalSecret:
+  dataFrom:
+    - extract:
+        key: nonprod/dev/backend          # APP_KEY, DB_HOST, REDIS_* ...
+  data:
+    # Master credentials live in the RDS-managed secret (auto-rotated).
+    - secretKey: DB_USERNAME
+      remoteRef: { key: "__DB_SECRET_ARN_DEV__", property: username }
+    - secretKey: DB_PASSWORD
+      remoteRef: { key: "__DB_SECRET_ARN_DEV__", property: password }
+
+ingress:
+  host: dev.__DOMAIN__
+  annotations:
+    alb.ingress.kubernetes.io/group.name: platform-dev     # one ALB per environment
+    alb.ingress.kubernetes.io/certificate-arn: __CERT_ARN_DEV__
+
+networkPolicy:
+  ingressFromCidrs: ["10.10.0.0/16"]   # ALB (target-type ip) lives in the VPC
+  ingressFromNamespaces: ["monitoring"]
+  dataTierCidrs: ["10.10.10.0/24", "10.10.11.0/24"]

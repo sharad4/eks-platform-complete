@@ -1,0 +1,31 @@
+# Laravel (backend + worker): swap the AWS-specific settings for in-cluster ones.
+config:
+  APP_ENV: production
+  DB_HOST: postgres.data.svc.cluster.local
+  DB_PORT: "5432"
+  DB_DATABASE: app
+  DB_SSLMODE: disable            # in-cluster, traffic never leaves the node
+  REDIS_HOST: redis.data.svc.cluster.local
+  REDIS_PORT: "6379"
+  REDIS_SCHEME: tcp
+  FILESYSTEM_DISK: local         # no S3 in lite; uploads land on the pod's disk (ephemeral)
+
+# Secrets (APP_KEY, DB_USERNAME, DB_PASSWORD, REDIS_PASSWORD) are NOT in Git: the
+# bootstrap script generates them into the `backend-secrets` Secret.
+externalSecret:
+  enabled: false
+existingSecret: backend-secrets
+
+# DB and Redis are pods in the `data` namespace, not VPC CIDRs.
+networkPolicy:
+  egressRules:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: data
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6379 }
+
+serviceAccount:
+  annotations: null              # no IRSA

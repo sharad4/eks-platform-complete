@@ -1,0 +1,11 @@
+# Default deny: a namespace starts with NO network access. Every allowed flow is declared
+# explicitly (the Helm chart ships a per-workload allow-list). A compromised pod can
+# therefore only talk to what its own policy lists. Enforced by the VPC CNI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: dev
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

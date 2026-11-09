@@ -1,0 +1,3 @@
+# Intentionally empty. Lets the ApplicationSet use a uniform
+# "values/<common>.yaml" path for workloads (frontend) with no shared config.
+{}

@@ -1,0 +1,9 @@
+installCRDs: true
+controller:
+  replicas: 1
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true      # needs the Prometheus Operator CRDs; retried until they exist
+dashboard:
+  enabled: false         # use `kubectl argo rollouts dashboard` locally instead of exposing a UI

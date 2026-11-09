@@ -1,0 +1,22 @@
+# Kyverno: admission control that checks (and can block) every Pod before it runs.
+# Pod Security Admission (namespace labels) already enforces the *Kubernetes* hardening
+# baseline; Kyverno adds the rules PSA cannot express (which registry, which tags,
+# mandatory resources, service-account hygiene). Policies live in ./policies.
+admissionController:
+  replicas: 1
+  container:
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { memory: 384Mi }
+backgroundController:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+reportsController:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+cleanupController:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }

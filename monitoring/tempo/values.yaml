@@ -1,0 +1,21 @@
+# Tempo (traces), single binary on a small EBS volume. The Laravel app can export
+# OTLP to tempo.monitoring.svc:4317 (gRPC) or :4318 (HTTP) once OpenTelemetry is
+# enabled in the app (OTEL_EXPORTER_OTLP_ENDPOINT). Optional but a strong addition:
+# it turns "p95 is high" into "THIS query in THIS service is slow".
+tempo:
+  retention: 72h
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: gp3

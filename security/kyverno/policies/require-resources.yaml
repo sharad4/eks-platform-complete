@@ -1,0 +1,32 @@
+# Part of the baseline guardrails. Pod Security Admission handles pod hardening;
+# this policy covers an organisation rule PSA cannot express.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resources
+  annotations:
+    policies.kyverno.io/title: Require resource requests and a memory limit
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Requests make scheduling and autoscaling meaningful; a memory limit contains leaks. (No CPU limit on purpose: it causes CFS throttling.)
+spec:
+  validationFailureAction: Enforce      # switch to Audit to trial a new rule without blocking anyone
+  background: true                      # also report on workloads that already exist
+  rules:
+    - name: require-requests-and-memory-limit
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [dev, staging, production]
+      validate:
+        message: "CPU and memory requests and a memory limit are required."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    memory: "?*"

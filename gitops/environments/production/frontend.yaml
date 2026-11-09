@@ -1,0 +1,21 @@
+# Environment layer (4 of 4). CI edits ONLY image.tag; humans edit the rest via PR.
+image:
+  repository: __ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/frontend
+  tag: "initial"
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 6
+
+ingress:
+  host: app.__DOMAIN__
+  annotations:
+    alb.ingress.kubernetes.io/group.name: platform-production     # one ALB per environment
+    alb.ingress.kubernetes.io/certificate-arn: __CERT_ARN_PRODUCTION__
+
+rollout:
+  enabled: true      # canary without metric analysis (static files expose no app SLI)
+pdb:
+  minAvailable: 2
+topologySpread:
+  zoneWhenUnsatisfiable: DoNotSchedule

@@ -1,0 +1,10 @@
+# Safety first: the controller only acts in namespaces that opt in with the
+# annotation chaos-mesh.org/inject=enabled (set on `dev` only). Production never has it.
+controllerManager:
+  enableFilterNamespace: true
+chaosDaemon:
+  runtime: containerd
+  socketPath: /run/containerd/containerd.sock   # EKS AL2023 nodes use containerd
+dashboard:
+  create: true
+  securityMode: true

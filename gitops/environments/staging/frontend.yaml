@@ -1,0 +1,14 @@
+# Environment layer (4 of 4). CI edits ONLY image.tag; humans edit the rest via PR.
+image:
+  repository: __ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/frontend
+  tag: "initial"
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 4
+
+ingress:
+  host: staging.__DOMAIN__
+  annotations:
+    alb.ingress.kubernetes.io/group.name: platform-staging     # one ALB per environment
+    alb.ingress.kubernetes.io/certificate-arn: __CERT_ARN_STAGING__

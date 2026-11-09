@@ -1,0 +1,22 @@
+# EXPERIMENT 2: add 300 ms latency (+/- 50 ms) to backend traffic for 5 minutes.
+# Hypothesis: p95 rises but stays understood; HighLatencyP95 fires after ~10 min if sustained,
+#   the HPA does NOT scale on latency (CPU-based), which is itself a finding.
+# Learn: do timeouts and retries in the app behave? Does the frontend degrade gracefully?
+# Run:  kubectl apply -f chaos/experiments/network-delay-backend.yaml
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-delay-backend
+  namespace: dev
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces: [dev]
+    labelSelectors:
+      app.kubernetes.io/name: backend
+  delay:
+    latency: 300ms
+    jitter: 50ms
+    correlation: "25"
+  duration: 5m

@@ -1,0 +1,55 @@
+# Production workloads. IDENTICAL to nonprod except for ONE thing: there is no
+# `automated` block. Merging a promotion PR updates Git; ArgoCD shows the app
+# OutOfSync; a human then clicks Sync (or runs `argocd app sync`), and the
+# Argo Rollouts canary does the rest. Three gates: approval -> PR review -> sync.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: workloads
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - { env: production, app: backend,  common: laravel-common }
+          - { env: production, app: worker,   common: laravel-common }
+          - { env: production, app: frontend, common: none }
+  template:
+    metadata:
+      name: "{{.app}}-{{.env}}"
+      labels:
+        environment: "{{.env}}"
+        app: "{{.app}}"
+    spec:
+      project: apps
+      sources:
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          path: helm/app
+          helm:
+            releaseName: "{{.app}}"
+            valueFiles:
+              - "values/{{.common}}.yaml"
+              - "values/{{.app}}.yaml"
+              - "$values/gitops/environments/{{.env}}/{{.app}}.yaml"
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      syncPolicy:
+        syncOptions:
+          - ServerSideApply=true
+          - SkipDryRunOnMissingResource=true
+        retry:
+          limit: 3
+          backoff: { duration: 30s, factor: 2, maxDuration: 5m }
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers: ["/spec/replicas"]

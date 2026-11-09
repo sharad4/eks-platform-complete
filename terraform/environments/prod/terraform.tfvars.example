@@ -1,0 +1,5 @@
+# Copy to terraform.tfvars (git-ignored).
+public_access_cidrs = ["198.51.100.0/24"] # your VPN / office egress range
+
+# EXTRA admins only; the identity running apply is already admin (see nonprod example).
+# admin_principal_arns = ["arn:aws:iam::123456789012:role/AWSReservedSSO_PlatformTeam_abcdef"]

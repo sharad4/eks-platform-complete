@@ -1,0 +1,53 @@
+# Laravel queue worker: same image as the backend, different command, no
+# Service, no Ingress, no inbound traffic.
+fullnameOverride: worker
+
+service:
+  enabled: false
+ingress:
+  enabled: false
+
+command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--max-time=3600"]
+
+# Re-use the backend's synced Secret (one source of truth, no duplicate sync).
+# Caveat: pods read env at start, so rotating a secret needs a rollout.
+# Production fix: Stakater Reloader (see "What I would improve").
+existingSecret: backend-secrets
+
+# Share the backend's ServiceAccount (and therefore its IRSA role: S3 access).
+# The backend release creates it; the worker only references it.
+serviceAccount:
+  create: false
+  name: backend
+
+# A worker may be mid-job at SIGTERM; give it time to finish. --max-time makes
+# it exit cleanly and restart hourly, which also bounds memory leaks.
+terminationGracePeriodSeconds: 120
+lifecycle: null     # no LB to drain from, so no preStop sleep
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+podSecurityContext:
+  runAsUser: 33
+  runAsGroup: 33
+securityContext:
+  readOnlyRootFilesystem: false    # same hardening TODO as the backend
+
+# No probes: there is no port to probe. A hung worker is bounded by --max-time.
+# Better signal (later): scale on Redis queue depth with KEDA.
+
+networkPolicy:
+  allowHttpsEgress: true
+  dataTierPorts: [5432, 6379]
+  # No ingress rules at all: nothing may connect to a worker.

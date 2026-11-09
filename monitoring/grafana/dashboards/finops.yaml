@@ -1,0 +1,390 @@
+# Dashboard as code: Grafana's sidecar loads any ConfigMap labelled grafana_dashboard=1.
+# Edit in the Grafana UI to experiment, then export the JSON back into this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-finops
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  finops.json: |
+    {
+      "uid": "finops",
+      "title": "FinOps: resource efficiency & estimated cost",
+      "description": "Where requested resources go, how much of them is used, and what that costs. A starting point, not a bill: use AWS Cost Explorer for actual spend.",
+      "tags": [
+        "eks-platform",
+        "finops"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "refresh": "30s",
+      "time": {
+        "from": "now-3h",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 13,
+          "type": "stat",
+          "title": "Nodes",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "count(kube_node_info)",
+              "legendFormat": "nodes",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "options": {}
+        },
+        {
+          "id": 14,
+          "type": "stat",
+          "title": "Estimated monthly cost of REQUESTED resources",
+          "description": "What you reserve, not what you use. Price inputs are editable above; defaults approximate on-demand m6i.large.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 4,
+            "y": 0,
+            "w": 10,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum((sum by (namespace) (kube_pod_container_resource_requests{resource=\"cpu\",container!=\"\"})) * $cpu_price + (sum by (namespace) (kube_pod_container_resource_requests{resource=\"memory\",container!=\"\"}) / 1024^3) * $mem_price) * 730",
+              "legendFormat": "USD/month",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "options": {}
+        },
+        {
+          "id": 15,
+          "type": "stat",
+          "title": "Estimated monthly WASTE (requested minus used)",
+          "description": "Right-sizing opportunity: lower requests (VPA recommendations help).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 14,
+            "y": 0,
+            "w": 10,
+            "h": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(clamp_min((sum by (namespace) (kube_pod_container_resource_requests{resource=\"cpu\",container!=\"\"})) - (sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=\"\"}[1h]))), 0) * $cpu_price + clamp_min((sum by (namespace) (kube_pod_container_resource_requests{resource=\"memory\",container!=\"\"}) / 1024^3) - (sum by (namespace) (container_memory_working_set_bytes{container!=\"\"}) / 1024^3), 0) * $mem_price) * 730",
+              "legendFormat": "USD/month",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "options": {}
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "CPU: requested vs used, by namespace",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 4,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (namespace) (kube_pod_container_resource_requests{resource=\"cpu\",container!=\"\"})",
+              "legendFormat": "{{namespace}} requested",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=\"\"}[1h]))",
+              "legendFormat": "{{namespace}} used",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Memory: requested vs used (GiB), by namespace",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 4,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (namespace) (kube_pod_container_resource_requests{resource=\"memory\",container!=\"\"}) / 1024^3",
+              "legendFormat": "{{namespace}} requested",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (namespace) (container_memory_working_set_bytes{container!=\"\"}) / 1024^3",
+              "legendFormat": "{{namespace}} used",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 18,
+          "type": "table",
+          "title": "CPU request efficiency by namespace (used / requested)",
+          "description": "Under ~30% means over-provisioned; over ~90% means no headroom for spikes.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 13,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "(sum by (namespace) (rate(container_cpu_usage_seconds_total{container!=\"\"}[1h]))) / (sum by (namespace) (kube_pod_container_resource_requests{resource=\"cpu\",container!=\"\"}))",
+              "legendFormat": "",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "options": {},
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "renameByName": {
+                  "Value": "efficiency"
+                },
+                "excludeByName": {
+                  "Time": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "type": "timeseries",
+          "title": "Estimated monthly cost by namespace (requests)",
+          "description": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 13,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "((sum by (namespace) (kube_pod_container_resource_requests{resource=\"cpu\",container!=\"\"})) * $cpu_price + (sum by (namespace) (kube_pod_container_resource_requests{resource=\"memory\",container!=\"\"}) / 1024^3) * $mem_price) * 730",
+              "legendFormat": "{{namespace}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        }
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "cpu_price",
+            "type": "textbox",
+            "label": "USD per vCPU-hour",
+            "query": "0.04",
+            "current": {
+              "text": "0.04",
+              "value": "0.04"
+            },
+            "options": [
+              {
+                "selected": true,
+                "text": "0.04",
+                "value": "0.04"
+              }
+            ]
+          },
+          {
+            "name": "mem_price",
+            "type": "textbox",
+            "label": "USD per GiB-hour",
+            "query": "0.005",
+            "current": {
+              "text": "0.005",
+              "value": "0.005"
+            },
+            "options": [
+              {
+                "selected": true,
+                "text": "0.005",
+                "value": "0.005"
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      }
+    }

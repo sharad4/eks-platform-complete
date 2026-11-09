@@ -1,0 +1,24 @@
+# Lite edition "app of apps": the only manifest applied by hand (the bootstrap
+# script does it). It watches lite/gitops/clusters/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+    targetRevision: main
+    path: lite/gitops/clusters
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

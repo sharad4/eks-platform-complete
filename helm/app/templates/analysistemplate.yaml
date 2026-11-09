@@ -1,0 +1,27 @@
+{{- if and .Values.rollout.enabled .Values.rollout.analysis.enabled }}
+# SLI-gated release: the canary is judged by the same metric the SLO uses
+# (non-5xx ratio). The controller queries Prometheus; no humans in the loop.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "app.fullname" . }}-success-rate
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: namespace
+    - name: service
+  metrics:
+    - name: success-rate
+      interval: {{ .Values.rollout.analysis.interval }}
+      failureLimit: {{ .Values.rollout.analysis.failureLimit }}
+      # No traffic yet => empty result => treated as success rather than a false abort.
+      successCondition: len(result) == 0 || result[0] >= {{ .Values.rollout.analysis.minSuccessRatio }}
+      provider:
+        prometheus:
+          address: {{ .Values.rollout.analysis.prometheusAddress }}
+          query: |
+            sum(rate(http_requests_total{namespace="{{ "{{" }}args.namespace{{ "}}" }}",service="{{ "{{" }}args.service{{ "}}" }}",status!~"5.."}[2m]))
+            /
+            sum(rate(http_requests_total{namespace="{{ "{{" }}args.namespace{{ "}}" }}",service="{{ "{{" }}args.service{{ "}}" }}"}[2m]))
+{{- end }}

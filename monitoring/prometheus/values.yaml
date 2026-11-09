@@ -1,0 +1,160 @@
+# kube-prometheus-stack: Prometheus Operator + Prometheus + Alertmanager + Grafana
+# + kube-state-metrics + node-exporter + the default Kubernetes alert rules
+# (KubePodCrashLooping, KubePodNotReady, KubeDeploymentReplicasMismatch,
+# NodeFilesystemSpaceFillingUp ...). Our own alerts/SLOs live in monitoring/prometheus/rules.
+crds:
+  enabled: true
+
+# EKS does not expose these control-plane components to scrapers; leaving them
+# enabled just produces permanent "target down" noise.
+kubeEtcd: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeProxy: { enabled: false }
+defaultRules:
+  rules:
+    etcd: false
+    kubeScheduler: false
+    kubeControllerManager: false
+    kubeProxy: false
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    retentionSize: 15GB
+    # Pick up EVERY ServiceMonitor / PrometheusRule in the cluster, not only
+    # those labelled with this Helm release. Otherwise the app chart's
+    # ServiceMonitor would be silently ignored.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    externalLabels:
+      cluster: unknown          # overridden per cluster
+    resources:
+      requests: { cpu: 200m, memory: 1Gi }
+      limits: { memory: 2Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+alertmanager:
+  alertmanagerSpec:
+    # Mounted at /etc/alertmanager/secrets/alertmanager-slack/ (synced from Secrets Manager).
+    secrets: ["alertmanager-slack"]
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { memory: 128Mi }
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+  # Routing philosophy: page for symptoms that hurt users (critical), ticket-level
+  # noise goes to a quieter channel (warning). A firing critical silences its own
+  # warning twin so one incident is one notification.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "null"
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']      # always-firing heartbeat: proves the pipeline works
+        - receiver: slack-critical
+          matchers: ['severity = "critical"']
+          repeat_interval: 1h
+        - receiver: slack-warning
+          matchers: ['severity = "warning"']
+    inhibit_rules:
+      - source_matchers: ['severity = "critical"']
+        target_matchers: ['severity = "warning"']
+        equal: ["alertname", "namespace"]
+    receivers:
+      - name: "null"
+      - name: slack-critical
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/url
+            channel: "#alerts-critical"
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})'
+            text: |-
+              {{ range .Alerts }}*{{ .Annotations.summary }}*
+              {{ .Annotations.description }}
+              Runbook: {{ .Annotations.runbook_url }}
+              {{ end }}
+      - name: slack-warning
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/url
+            channel: "#alerts-warning"
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.namespace }})'
+            text: |-
+              {{ range .Alerts }}{{ .Annotations.summary }}
+              Runbook: {{ .Annotations.runbook_url }}
+              {{ end }}
+
+grafana:
+  # The chart default admin password is public knowledge. Credentials come from
+  # AWS Secrets Manager via External Secrets (monitoring/alertmanager/).
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    size: 5Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard      # any ConfigMap with this label becomes a dashboard (dashboards as code)
+      labelValue: "1"
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki.monitoring.svc:3100
+      jsonData:
+        derivedFields:             # a traceID in a log line becomes a clickable link to the trace
+          - name: TraceID
+            matcherRegex: '"trace_id":"(\w+)"'
+            url: '$${__value.raw}'
+            datasourceUid: tempo
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      access: proxy
+      url: http://tempo.monitoring.svc:3100
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+        serviceMap:
+          datasourceUid: prometheus
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 128Mi }

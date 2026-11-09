@@ -1,0 +1,5 @@
+bucket         = "eks-platform-tfstate-123456789012"
+key            = "nonprod-addons/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "eks-platform-tfstate-lock"
+encrypt        = true

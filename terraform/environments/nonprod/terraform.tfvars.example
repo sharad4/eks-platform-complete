@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (git-ignored).
+
+# Restrict the Kubernetes API to your own IP. Find it with: curl -s ifconfig.me
+public_access_cidrs = ["203.0.113.10/32"]
+
+# EXTRA cluster admins only (teammates, an SSO admin role, a CI role).
+# Do NOT add the identity you run `terraform apply` with: it is made admin
+# automatically at cluster creation, and listing it again fails with
+# ResourceInUseException. Leave empty if you are the only user.
+# admin_principal_arns = ["arn:aws:iam::123456789012:role/AWSReservedSSO_PlatformTeam_abcdef"]

@@ -1,0 +1,66 @@
+# One ApplicationSet stamps out 6 Applications: {backend, frontend, worker} x {dev, staging}.
+#
+# Each Application = the SAME chart (helm/app) + layered values:
+#   values/<common>.yaml -> values/<app>.yaml -> gitops/environments/<env>/<app>.yaml
+# The last file is where CI bumps the image tag. That single-line change IS the deployment.
+#
+# Multi-source: source 1 is the chart, source 2 (ref: values) is just this repo
+# exposed as $values so the chart can read env values that live OUTSIDE the chart.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: workloads
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"      # created after platform config/tools/policies (eventually consistent, see platform-tools.yaml)
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - { env: dev,     app: backend,  common: laravel-common }
+          - { env: dev,     app: worker,   common: laravel-common }
+          - { env: dev,     app: frontend, common: none }
+          - { env: staging, app: backend,  common: laravel-common }
+          - { env: staging, app: worker,   common: laravel-common }
+          - { env: staging, app: frontend, common: none }
+  template:
+    metadata:
+      name: "{{.app}}-{{.env}}"
+      labels:
+        environment: "{{.env}}"
+        app: "{{.app}}"
+    spec:
+      project: apps
+      sources:
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          path: helm/app
+          helm:
+            releaseName: "{{.app}}"
+            valueFiles:
+              - "values/{{.common}}.yaml"
+              - "values/{{.app}}.yaml"
+              - "$values/gitops/environments/{{.env}}/{{.app}}.yaml"
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.env}}"
+      # dev and staging: Git merge == deploy. Drift is reverted (selfHeal).
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true
+          - SkipDryRunOnMissingResource=true   # ServiceMonitor/Rollout CRDs may arrive moments later
+        retry:
+          limit: 5
+          backoff: { duration: 15s, factor: 2, maxDuration: 3m }
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers: ["/spec/replicas"]     # owned by the HPA / Rollout at runtime

@@ -1,0 +1,27 @@
+# Non-secret Laravel configuration shared by the API and the queue worker.
+# Both read the SAME keys, so they live in one file (used as an extra
+# `-f` / ArgoCD valueFile for backend and worker).
+#
+# Secrets (APP_KEY, DB_*, REDIS_*) are NOT here. They come from AWS Secrets
+# Manager through External Secrets.
+config:
+  APP_NAME: eks-platform
+  APP_ENV: production            # overridden per environment
+  APP_DEBUG: "false"             # debug pages leak stack traces and secrets
+  LOG_CHANNEL: stderr            # 12-factor: log to stdout/stderr, never to files
+  LOG_STDERR_FORMATTER: 'Monolog\Formatter\JsonFormatter'   # structured JSON for Loki
+  LOG_LEVEL: info
+
+  DB_CONNECTION: pgsql
+  DB_SSLMODE: require            # RDS enforces TLS (rds.force_ssl=1)
+
+  CACHE_STORE: redis
+  SESSION_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  REDIS_CLIENT: phpredis
+  REDIS_SCHEME: tls              # ElastiCache has in-transit encryption on.
+                                 # Make sure config/database.php reads REDIS_SCHEME.
+
+  FILESYSTEM_DISK: s3
+  AWS_DEFAULT_REGION: us-east-1
+  # No AWS keys anywhere: the AWS SDK picks up the IRSA token automatically.

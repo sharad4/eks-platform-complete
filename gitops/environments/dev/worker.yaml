@@ -1,0 +1,17 @@
+# Environment layer (4 of 4). CI edits ONLY image.tag; humans edit the rest via PR.
+image:
+  repository: __ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/backend       # same image as the API, different command
+  tag: "initial"
+
+config:
+  APP_ENV: dev
+  AWS_BUCKET: eks-platform-dev-uploads-__ACCOUNT_ID__
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 2
+
+networkPolicy:
+  ingressFromCidrs: []                # nothing connects to a worker
+  ingressFromNamespaces: []
+  dataTierCidrs: ["10.10.10.0/24", "10.10.11.0/24"]

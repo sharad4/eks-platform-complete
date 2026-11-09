@@ -1,0 +1,28 @@
+# Environment namespaces for the shared non-prod cluster.
+#
+# Pod Security Admission (built into Kubernetes, no extra software):
+#   enforce: restricted  -> pods that violate the profile are REJECTED
+#   audit/warn           -> violations are logged / shown to the user
+# "restricted" requires: non-root, no privilege escalation, drop ALL capabilities,
+# RuntimeDefault seccomp. The Helm chart's defaults satisfy it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  annotations:
+    chaos-mesh.org/inject: enabled   # the ONLY namespace where chaos experiments may run
+  labels:
+    environment: dev
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    environment: staging
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

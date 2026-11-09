@@ -1,0 +1,80 @@
+name: Terraform apply
+
+# Merge to main -> apply, one environment at a time. Each job targets a GitHub
+# Environment with required reviewers, and ONLY those environments can assume the
+# apply role (see terraform/bootstrap trust policy). No approval, no credentials.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/environments/**"
+      - "terraform/modules/**"
+  workflow_dispatch:
+
+# Never two applies at once; never cancel one that is halfway through.
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  nonprod:
+    runs-on: ubuntu-latest
+    environment: nonprod-infra
+    defaults:
+      run:
+        working-directory: terraform/environments/nonprod
+    env:
+      TF_VAR_public_access_cidrs: ${{ vars.TF_PUBLIC_ACCESS_CIDRS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=nonprod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=eks-platform-tfstate-lock" \
+            -backend-config="encrypt=true"
+      - run: terraform plan -input=false -out=tfplan
+      - run: terraform apply -input=false tfplan
+
+  prod:
+    needs: nonprod # a broken change must prove itself in non-prod first
+    runs-on: ubuntu-latest
+    environment: production-infra
+    defaults:
+      run:
+        working-directory: terraform/environments/prod
+    env:
+      TF_VAR_public_access_cidrs: ${{ vars.TF_PUBLIC_ACCESS_CIDRS_PROD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=prod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=eks-platform-tfstate-lock" \
+            -backend-config="encrypt=true"
+      - run: terraform plan -input=false -out=tfplan
+      - run: terraform apply -input=false tfplan

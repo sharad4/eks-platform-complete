@@ -1,0 +1,35 @@
+# OPTIONAL. Needs ~1.2 GB more RAM, so only use it on a 4 GB+ node.
+# Enable:  git mv lite/gitops/optional/monitoring.yaml lite/gitops/clusters/
+#          kubectl create ns monitoring
+#          kubectl -n monitoring create secret generic grafana-admin \
+#            --from-literal=admin-user=admin --from-literal=admin-password="$(openssl rand -hex 12)"
+# Then set metrics.serviceMonitor.enabled: true in lite/gitops/values/_common.yaml.
+# The chart version is NOT verified (see scripts/check-versions.sh).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-lite
+  namespace: argocd
+spec:
+  project: platform-lite
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 75.6.0
+      helm:
+        releaseName: kube-prometheus-stack
+        valueFiles:
+          - $values/lite/monitoring/values-prometheus-lite.yaml
+    - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

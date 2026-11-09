@@ -1,0 +1,272 @@
+name: CI
+
+# Lint -> Test -> Build -> Scan (Trivy) -> Push (ECR) -> bump dev image tag in Git.
+# ArgoCD does the actual deployment: CI never talks to the cluster, so the
+# pipeline needs no cluster credentials at all (that is the point of GitOps).
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "gitops/environments/**"   # CI's own tag-bump commits must not retrigger CI
+      - "docs/**"
+      - "**.md"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_PREFIX: eks-platform
+
+jobs:
+  # Lets the pipeline be green on a fresh repo that has not got app code yet.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.f.outputs.apps }}
+      backend: ${{ steps.f.outputs.backend }}
+      frontend: ${{ steps.f.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        run: |
+          apps=()
+          backend=false; frontend=false
+          if [ -f apps/backend/composer.json ]; then apps+=(backend); backend=true; fi
+          if [ -f apps/frontend/package.json ]; then apps+=(frontend); frontend=true; fi
+          {
+            echo "apps=$(jq -cn '$ARGS.positional' --args "${apps[@]}")"
+            echo "backend=$backend"
+            echo "frontend=$frontend"
+          } >> "$GITHUB_OUTPUT"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+      - name: terraform fmt
+        run: terraform fmt -check -recursive terraform
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+      - name: Helm lint + render + schema validation
+        run: scripts/render-charts.sh
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh lite/scripts/*.sh
+
+      - name: hadolint (backend)
+        if: hashFiles('apps/backend/Dockerfile') != ''
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: apps/backend/Dockerfile
+      - name: hadolint (frontend)
+        if: hashFiles('apps/frontend/Dockerfile') != ''
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: apps/frontend/Dockerfile
+
+      - name: checkov (Terraform security)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          quiet: true
+          # Flip to false once the baseline is triaged, so new findings block merges.
+          soft_fail: true
+
+  test-backend:
+    needs: detect
+    if: needs.detect.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_pgsql, redis, pcntl, apcu
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: apps/backend/vendor
+          key: composer-${{ hashFiles('apps/backend/composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: cp .env.example .env && php artisan key:generate
+      - name: Tests
+        run: php artisan test
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_DATABASE: app_test
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          REDIS_HOST: 127.0.0.1
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+
+  test-frontend:
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint --if-present
+      - run: npm test --if-present
+      - run: npm run build
+
+  build:
+    needs: [detect, lint, test-backend, test-frontend]
+    if: >-
+      ${{ !cancelled()
+      && needs.detect.outputs.apps != '[]'
+      && needs.lint.result == 'success'
+      && needs.test-backend.result != 'failure'
+      && needs.test-frontend.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC: short-lived AWS credentials, no stored keys
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.detect.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image tag = short git SHA
+        run: echo "TAG=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # 1) Build locally WITHOUT pushing, so nothing vulnerable ever reaches the registry.
+      - name: Build (local only)
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          load: true
+          tags: local/${{ matrix.app }}:${{ env.TAG }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,scope=${{ matrix.app }},mode=max
+
+      # 2) Scan. CRITICAL/HIGH with an available fix fails the build.
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: local/${{ matrix.app }}:${{ env.TAG }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # 3) Only main pushes. PRs stop after the scan.
+      - name: Configure AWS credentials (OIDC)
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        if: github.event_name == 'push'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ECR tags are IMMUTABLE, so re-running a job for the same commit would fail on push.
+      - name: Skip push if tag already exists
+        if: github.event_name == 'push'
+        id: exists
+        run: |
+          if aws ecr describe-images --repository-name "$ECR_PREFIX/${{ matrix.app }}" \
+               --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push to ECR
+        if: github.event_name == 'push' && steps.exists.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          push: true
+          provenance: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_PREFIX }}/${{ matrix.app }}:${{ env.TAG }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+
+  # CI's only "deployment" step: edit one YAML line in Git. ArgoCD notices and syncs dev.
+  update-gitops:
+    needs: [detect, build]
+    if: github.event_name == 'push' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump dev image tags
+        env:
+          APPS: ${{ needs.detect.outputs.apps }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_SHA::7}"
+          set_tag() {
+            # style="double" keeps all-digit SHAs as strings (1234567 would otherwise become an int).
+            TAG="$TAG" yq -i '.image.tag = strenv(TAG) | .image.tag style="double"' "gitops/environments/dev/$1.yaml"
+          }
+          if jq -e 'index("backend")' <<<"$APPS" >/dev/null; then set_tag backend; set_tag worker; fi
+          if jq -e 'index("frontend")' <<<"$APPS" >/dev/null; then set_tag frontend; fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gitops/environments/dev
+          git diff --cached --quiet && { echo "nothing to commit"; exit 0; }
+          git commit -m "ci: deploy ${TAG} to dev [skip ci]"
+          # Branch protection: allow github-actions[bot] to bypass for this path, or use a deploy key / GitHub App token.
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((i * 3))
+          done
+          exit 1

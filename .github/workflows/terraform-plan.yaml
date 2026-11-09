@@ -1,0 +1,88 @@
+name: Terraform plan
+
+# Read-only plan on every PR that touches infrastructure; the result is posted
+# as a PR comment so reviewers see exactly what would change before approving.
+# Uses the read-only OIDC role: a malicious PR cannot modify AWS.
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-*.yaml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [nonprod, prod]
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ matrix.env }}
+    env:
+      TF_VAR_public_access_cidrs: ${{ vars.TF_PUBLIC_ACCESS_CIDRS }} # JSON list, e.g. ["203.0.113.10/32"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ matrix.env }}/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=eks-platform-tfstate-lock" \
+            -backend-config="encrypt=true"
+
+      - run: terraform validate -no-color
+
+      - name: Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock=false -detailed-exitcode 2>&1 | tee plan.txt
+          code=${PIPESTATUS[0]}
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          # 0 = no changes, 2 = changes (both fine). 1 = error.
+          [ "$code" -eq 1 ] && exit 1 || exit 0
+
+      - name: Comment plan on PR
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          ENVNAME: ${{ matrix.env }}
+          WORKDIR: terraform/environments/${{ matrix.env }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `${process.env.WORKDIR}/plan.txt`;
+            let body = fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : 'plan did not run';
+            if (body.length > 60000) body = '...(truncated)...\n' + body.slice(-60000);
+            const marker = `<!-- tfplan-${process.env.ENVNAME} -->`;
+            const text = `${marker}\n### Terraform plan: \`${process.env.ENVNAME}\`\n<details><summary>Show plan</summary>\n\n\`\`\`\n${body}\n\`\`\`\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body: text });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body: text });
+            }

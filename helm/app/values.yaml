@@ -1,0 +1,211 @@
+# =============================================================================
+# Chart defaults. Values are layered (later wins):
+#
+#   1. this file                         secure, generic defaults
+#   2. values/laravel-common.yaml        config shared by backend + worker
+#   3. values/<app>.yaml                 backend | frontend | worker
+#   4. gitops/environments/<env>/*.yaml  image tag, hostnames, ARNs, sizing
+#
+# Rule of thumb: if a value differs per ENVIRONMENT it belongs in layer 4, never
+# baked into the chart. That is what makes promotion = "change an image tag".
+# =============================================================================
+
+nameOverride: ""
+fullnameOverride: ""
+partOf: eks-platform
+
+# --- Image -------------------------------------------------------------------
+image:
+  repository: ""        # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/eks-platform/backend
+  tag: ""               # REQUIRED. Git SHA from CI. Never "latest": tags are immutable in ECR.
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# --- Process -----------------------------------------------------------------
+command: []             # override ENTRYPOINT (the worker uses this)
+args: []                # override CMD
+containerPort: 8080     # non-root processes cannot bind <1024
+env: {}                 # inline, non-sensitive, simple vars (name: value)
+extraEnv: []            # raw env entries, e.g. downward API (fieldRef)
+config: {}              # key/value -> ConfigMap -> envFrom (checksum triggers a rollout on change)
+existingSecret: ""      # envFrom an already-existing Secret (e.g. worker re-uses backend's)
+
+# --- Secrets via External Secrets Operator -----------------------------------
+# The Git repo holds only *references*; values are pulled from AWS Secrets
+# Manager at runtime using the ESO controller's IRSA role.
+externalSecret:
+  enabled: false
+  apiVersion: external-secrets.io/v1beta1
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  data: []              # [{secretKey: DB_PASSWORD, remoteRef: {key: <name-or-arn>, property: password}}]
+  dataFrom: []          # [{extract: {key: nonprod/dev/backend}}]  -> every JSON key becomes an env var
+
+# --- Replicas / autoscaling --------------------------------------------------
+replicaCount: 2         # ignored when autoscaling.enabled
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0   # never drop capacity during a deploy
+terminationGracePeriodSeconds: 30
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70      # % of the CPU *request*
+  targetMemoryUtilizationPercentage: null
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300     # avoid flapping after a spike
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+
+# --- Resources ---------------------------------------------------------------
+# Requests drive scheduling AND the HPA. We set a MEMORY limit (OOM-kill is the
+# right outcome for a leak) but deliberately NO CPU limit: CPU limits cause CFS
+# throttling and latency spikes even when the node has idle cores.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+# --- Health probes (raw Kubernetes probe objects) ----------------------------
+# startup  -> gives slow boots time without loosening liveness
+# liveness -> "restart me": must NOT depend on DB/Redis (or a DB blip restarts everything)
+# readiness-> "send me traffic": MAY check dependencies
+probes:
+  startup: null
+  liveness: null
+  readiness: null
+
+lifecycle:
+  # Keep serving for a few seconds after SIGTERM so the ALB can deregister the
+  # pod. Without it, requests in flight during a rollout hit a dying pod.
+  preStop:
+    exec:
+      command: ["sleep", "10"]
+
+# --- Service / Ingress -------------------------------------------------------
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: alb
+  host: ""
+  paths:
+    - path: /
+      pathType: Prefix
+  annotations: {}       # ALB annotations (group.name, certificate-arn, ...) come from env values
+
+# --- Reliability -------------------------------------------------------------
+pdb:
+  enabled: true
+  maxUnavailable: 1     # voluntary disruptions (node drains) remove at most 1 pod
+  minAvailable: null    # set INSTEAD of maxUnavailable for larger fleets (e.g. 2)
+
+topologySpread:
+  enabled: true         # spread across zones (soft) and nodes (soft)
+  zoneWhenUnsatisfiable: ScheduleAnyway   # use DoNotSchedule in prod if you must guarantee AZ spread
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# --- Security (Pod Security Standard "restricted" compliant) -------------------
+serviceAccount:
+  create: true
+  name: ""
+  automount: false      # app does not call the K8s API. IRSA's token is injected separately.
+  annotations: {}       # eks.amazonaws.com/role-arn: <irsa role> (env values)
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+tmpVolume:
+  enabled: true         # writable emptyDir at /tmp, needed once the root FS is read-only
+extraVolumes: []
+extraVolumeMounts: []
+
+# --- NetworkPolicy (default-deny, then allow-list) -------------------------
+# Enabling a policy that selects the pods flips them from "allow all" to
+# "deny everything not listed". Enforced by the VPC CNI (enableNetworkPolicy).
+networkPolicy:
+  enabled: true
+  allowDns: true                 # egress to CoreDNS
+  allowHttpsEgress: false        # egress 443 to anywhere (AWS APIs: S3, STS, Secrets Manager)
+  ingressFromCidrs: []           # who may call us: the VPC CIDR (ALB nodes, target-type ip)
+  ingressFromNamespaces: []      # e.g. [monitoring] so Prometheus can scrape
+  dataTierCidrs: []              # RDS / ElastiCache subnet CIDRs
+  dataTierPorts: []              # [5432, 6379]
+  ingressRules: []               # raw extras
+  egressRules: []                # raw extras
+
+podAnnotations: {}
+podLabels: {}
+
+# --- Progressive delivery (Argo Rollouts canary) -----------------------------
+# When enabled, a Rollout takes over running the pods (the Deployment becomes a
+# 0-replica template holder via workloadRef) and the HPA targets the Rollout.
+# Requires the Argo Rollouts controller (installed by ArgoCD, Phase 4).
+#
+# TRADE-OFF: this is a replica-weighted canary (no traffic router). With 4 pods,
+# "setWeight: 25" means 1 canary pod, so ~25% of requests. Exact percentage
+# routing needs the ALB traffic-router integration (two Services + weighted
+# target groups), which is the next upgrade.
+rollout:
+  enabled: false
+  maxSurge: 25%
+  maxUnavailable: 0
+  steps:
+    - setWeight: 25
+    - pause: { duration: 2m }
+    - setWeight: 50
+    - pause: { duration: 2m }
+    - setWeight: 100
+  analysis:
+    enabled: false      # needs the app to export http_requests_total (backend only)
+    prometheusAddress: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+    interval: 1m
+    failureLimit: 1
+    minSuccessRatio: 0.99   # abort + auto-rollback if the success ratio drops below this
+
+# --- DB migrations (ArgoCD Sync hook, wave 1) ----------------------------------
+# One Job per release, BEFORE the new pods start. Never run migrations from the
+# container entrypoint: N replicas would race each other.
+migration:
+  enabled: false
+  command: ["php", "artisan", "migrate", "--force"]
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# --- Metrics -----------------------------------------------------------------
+metrics:
+  path: /metrics
+  serviceMonitor:
+    enabled: false      # needs the Prometheus Operator CRDs (Phase 5)
+    interval: 30s
+    labels: {}

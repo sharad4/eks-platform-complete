@@ -1,0 +1,9 @@
+# Extra render pass: exercises the Rollout, AnalysisTemplate and migration paths.
+rollout:
+  enabled: true
+  analysis:
+    enabled: true
+migration:
+  enabled: true
+autoscaling:
+  enabled: true

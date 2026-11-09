@@ -1,0 +1,65 @@
+# Nightly pg_dump to a second volume on the same node, keeping the last 7.
+# This protects against bad migrations and deleted rows, NOT against losing the
+# VM. For that, copy /backups off the node (e.g. `aws s3 cp` from a cron job
+# or an S3 sync sidecar) -- see lite/README.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-backups
+  namespace: data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-backup
+  namespace: data
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app: pg-backup }
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            fsGroup: 70
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: dump
+              image: postgres:16-alpine
+              envFrom:
+                - secretRef: { name: postgres-auth }
+              command:
+                - sh
+                - -ec
+                - |
+                  f="/backups/app-$(date +%Y%m%d-%H%M).sql.gz"
+                  PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h postgres -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$f"
+                  ls -1t /backups/app-*.sql.gz | tail -n +8 | xargs -r rm --
+                  echo "wrote $f"
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { memory: 256Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: pg-backups }
+            - { name: tmp, emptyDir: {} }

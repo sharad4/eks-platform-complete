@@ -1,0 +1,27 @@
+# Part of the baseline guardrails. Pod Security Admission handles pod hardening;
+# this policy covers an organisation rule PSA cannot express.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict image registries
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Workloads may only run images from our own ECR repositories. Stops typo-squatted or unscanned public images from reaching the cluster.
+spec:
+  validationFailureAction: Enforce      # switch to Audit to trial a new rule without blocking anyone
+  background: true                      # also report on workloads that already exist
+  rules:
+    - name: only-our-ecr
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [dev, staging, production]
+      validate:
+        message: "Images must come from __ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/."
+        pattern:
+          spec:
+            containers:
+              - image: "__ACCOUNT_ID__.dkr.ecr.__REGION__.amazonaws.com/eks-platform/*"

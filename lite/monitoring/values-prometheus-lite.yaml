@@ -1,0 +1,42 @@
+# Trimmed kube-prometheus-stack for a single small node.
+# Dropped vs the full edition: Alertmanager, node-exporter (needs privileged PSA),
+# Loki, Tempo, Alloy, and the control-plane scrapes (k3s embeds those components).
+alertmanager:
+  enabled: false
+nodeExporter:
+  enabled: false
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }
+kubeEtcd: { enabled: false }
+prometheus:
+  prometheusSpec:
+    retention: 3d
+    resources:
+      requests: { cpu: 100m, memory: 300Mi }
+      limits: { memory: 600Mi }
+    # Pick up ServiceMonitors / rules from any namespace without Helm labels.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources: { requests: { storage: 5Gi } }
+grafana:
+  enabled: true
+  admin:
+    existingSecret: grafana-admin     # created by you, see lite/README.md
+    userKey: admin-user
+    passwordKey: admin-password
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }
+kube-state-metrics:
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 96Mi }

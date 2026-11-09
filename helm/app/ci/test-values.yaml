@@ -1,0 +1,25 @@
+# Fake environment values so `helm lint` / `helm template` can render the chart
+# in CI without a cluster. NOT used for real deployments.
+image:
+  repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/eks-platform/app
+  tag: "abc1234"
+
+ingress:
+  host: app.example.com
+  annotations:
+    alb.ingress.kubernetes.io/group.name: platform-test
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000
+
+externalSecret:
+  dataFrom:
+    - extract:
+        key: nonprod/dev/backend
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/eks-platform-dev-backend
+
+networkPolicy:
+  ingressFromCidrs: ["10.10.0.0/16"]
+  ingressFromNamespaces: ["monitoring"]
+  dataTierCidrs: ["10.10.10.0/24", "10.10.11.0/24"]

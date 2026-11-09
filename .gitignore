@@ -1,0 +1,25 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+backend.hcl
+terraform.tfvars
+*.auto.tfvars
+
+# Keep lock files: they pin provider versions for reproducible runs
+!.terraform.lock.hcl
+
+# Secrets / local
+.env
+*.pem
+*.key
+
+# Node / PHP
+node_modules/
+dist/
+apps/backend/vendor/
+.env
+.env.*
+!.env.example

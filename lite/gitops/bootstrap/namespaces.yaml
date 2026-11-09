@@ -1,0 +1,17 @@
+# Applied once by lite/scripts/bootstrap-cluster.sh (before the Secrets that live
+# in them). Pod Security "restricted" is enforced on both, same as the full edition.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lite
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

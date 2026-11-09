@@ -1,0 +1,51 @@
+# Same chart as the full edition (helm/app); only the values differ.
+# Layers (later wins): chart values/<common> -> chart values/<app> ->
+#   lite _common -> lite _<kind> -> lite <app>   (CI edits only image.tag in the last one)
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: workloads
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - { app: backend,  common: laravel-common, kind: laravel }
+          - { app: worker,   common: laravel-common, kind: laravel }
+          - { app: frontend, common: none,           kind: none }
+  template:
+    metadata:
+      name: "{{.app}}-lite"
+      labels:
+        app: "{{.app}}"
+    spec:
+      project: apps-lite
+      sources:
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          path: helm/app
+          helm:
+            releaseName: "{{.app}}"
+            valueFiles:
+              - "values/{{.common}}.yaml"
+              - "values/{{.app}}.yaml"
+              - "$values/lite/gitops/values/_common.yaml"
+              - "$values/lite/gitops/values/_{{.kind}}.yaml"
+              - "$values/lite/gitops/values/{{.app}}.yaml"
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: lite
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true
+        retry:
+          limit: 10
+          backoff: { duration: 30s, factor: 2, maxDuration: 10m }

@@ -1,0 +1,25 @@
+# Applied once on the PRODUCTION cluster:  kubectl apply -f gitops/bootstrap/root-prod.yaml
+# Same pattern as nonprod. Platform tooling auto-syncs; the workloads inside
+# gitops/clusters/prod deliberately do NOT (see workloads.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
+    targetRevision: main
+    path: gitops/clusters/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

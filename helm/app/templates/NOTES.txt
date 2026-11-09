@@ -1,0 +1,4 @@
+{{ include "app.fullname" . }} deployed with image {{ include "app.image" . }}
+
+  kubectl -n {{ .Release.Namespace }} get deploy,pods,hpa,pdb,networkpolicy -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "app.fullname" . }}
