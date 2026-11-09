@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Fills the __TOKENS__ in lite/ with your GitHub org/repo. Run once, commit, push.
+# Fills the __TOKENS__ in lite/ with your GitHub org/repo.
+# Run once, then commit and push.
+# Example:
+#   GITHUB_ORG=your-org GITHUB_REPO=your-repo bash lite/scripts/configure.sh
 #
-  GITHUB_ORG=sharad4 GITHUB_REPO=eks-platform lite/scripts/configure.sh
-#
-# GHCR requires lowercase image names, so lowercase variants are derived. sharad4
+# GHCR requires lowercase image names, so lowercase variants are derived.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
