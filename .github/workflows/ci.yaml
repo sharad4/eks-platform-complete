@@ -194,7 +194,7 @@ jobs:
 
       # 2) Scan. CRITICAL/HIGH with an available fix fails the build.
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: local/${{ matrix.app }}:${{ env.TAG }}
           format: table
