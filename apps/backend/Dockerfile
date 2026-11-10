@@ -28,7 +28,13 @@ FROM serversideup/php:8.3-fpm-nginx AS runtime
 
 # Extensions: pdo_pgsql (RDS), redis (ElastiCache), pcntl (queue workers), apcu (per-pod Prometheus metrics).
 USER root
-RUN install-php-extensions pdo_pgsql redis pcntl opcache apcu
+# Pull in OS security fixes published since the base image was built (Trivy gates CI on
+# fixable HIGH/CRITICAL findings, e.g. zlib1g). Revisit once the base image catches up.
+# hadolint ignore=DL3008,DL3009
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && install-php-extensions pdo_pgsql redis pcntl opcache apcu
 USER www-data
 
 ENV PHP_OPCACHE_ENABLE=1 \
