@@ -1,4 +1,4 @@
 # Environment layer. CI edits ONLY image.tag (lite/.github workflow: ci-lite.yaml).
 image:
-  repository: ghcr.io/__GITHUB_ORG_LC__/__GITHUB_REPO_LC__/backend
+  repository: ghcr.io/sharad4/eks-platform-complete/backend
   tag: "1ab6467"      # replaced by CI after the first image build
