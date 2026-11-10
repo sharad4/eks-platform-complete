@@ -76,6 +76,7 @@ kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=300s
 kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
 
 echo "==> Root application"
+kubectl apply -f lite/gitops/bootstrap/default-project.yaml
 kubectl apply -f lite/gitops/bootstrap/root.yaml
 
 cat <<MSG

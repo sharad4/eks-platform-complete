@@ -1,0 +1,13 @@
+# Core-mode Argo CD runs no API server, which is what normally creates the
+# "default" AppProject. The root Application lives in it, so create it here.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  sourceRepos: ["*"]
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: "*" }
+  clusterResourceWhitelist:
+    - { group: "*", kind: "*" }
