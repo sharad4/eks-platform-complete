@@ -70,6 +70,10 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+        env:
+          # The default DB mirror can rate-limit or stall on shared runners; try several.
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2,mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1,ghcr.io/aquasecurity/trivy-java-db:1
 
       - uses: docker/login-action@v3
         with:

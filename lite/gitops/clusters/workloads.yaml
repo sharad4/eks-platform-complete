@@ -23,7 +23,7 @@ spec:
     spec:
       project: apps-lite
       sources:
-        - repoURL: https://github.com/sharad4/eks-platform.git
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
           targetRevision: main
           path: helm/app
           helm:
@@ -34,7 +34,7 @@ spec:
               - "$values/lite/gitops/values/_common.yaml"
               - "$values/lite/gitops/values/_{{.kind}}.yaml"
               - "$values/lite/gitops/values/{{.app}}.yaml"
-        - repoURL: https://github.com/sharad4/eks-platform.git
+        - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
           targetRevision: main
           ref: values
       destination:

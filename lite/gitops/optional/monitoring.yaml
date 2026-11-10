@@ -20,7 +20,7 @@ spec:
         releaseName: kube-prometheus-stack
         valueFiles:
           - $values/lite/monitoring/values-prometheus-lite.yaml
-    - repoURL: https://github.com/sharad4/eks-platform.git
+    - repoURL: https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
       targetRevision: main
       ref: values
   destination:

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Fills the __TOKENS__ in lite/ with your GitHub org/repo.
-# Run once, then commit and push.
-# Example:
-#   GITHUB_ORG=your-org GITHUB_REPO=your-repo bash lite/scripts/configure.sh
+# Fills the __TOKENS__ in lite/ with your GitHub org/repo. Run once, commit, push.
+#
+#   GITHUB_ORG=acme GITHUB_REPO=eks-platform lite/scripts/configure.sh
 #
 # GHCR requires lowercase image names, so lowercase variants are derived.
 set -euo pipefail

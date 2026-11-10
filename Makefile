@@ -42,6 +42,7 @@ lite-validate:
 	terraform -chdir=terraform/lite init -backend=false
 	terraform -chdir=terraform/lite validate
 	terraform fmt -check terraform/lite
+	@python3 -c "import yaml" 2>/dev/null || { echo "PyYAML missing: pip install pyyaml (skipping YAML parse)"; exit 0; }; \
 	python3 -c "import yaml,glob; [list(yaml.safe_load_all(open(f))) for f in glob.glob('lite/**/*.yaml', recursive=True)]; print('lite yaml ok')"
 
 lite-up:

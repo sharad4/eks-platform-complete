@@ -8,7 +8,7 @@ metadata:
 spec:
   description: Lite workloads. Same guard rails as the full edition.
   sourceRepos:
-    - https://github.com/sharad4/eks-platform.git
+    - https://github.com/__GITHUB_ORG__/__GITHUB_REPO__.git
   destinations:
     - { server: https://kubernetes.default.svc, namespace: lite }
   clusterResourceWhitelist: []
