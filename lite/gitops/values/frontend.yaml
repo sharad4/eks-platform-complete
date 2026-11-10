@@ -1,4 +1,4 @@
 # Environment layer. CI edits ONLY image.tag (lite/.github workflow: ci-lite.yaml).
 image:
   repository: ghcr.io/__GITHUB_ORG_LC__/__GITHUB_REPO_LC__/frontend
-  tag: "initial"      # replaced by CI after the first image build
+  tag: "1ab6467"      # replaced by CI after the first image build
